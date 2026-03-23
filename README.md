@@ -1,0 +1,1 @@
+Repo for initialising flowline variables in thermo-coupled ice sheet. Run via command  ./Initialise.sh
