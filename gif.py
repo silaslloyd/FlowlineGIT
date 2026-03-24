@@ -8,7 +8,7 @@ import glob
 
 # Path to your PNGs (sorted by filename)
 
-png_files = sorted(glob.glob("/import/ontap-m-glaciology/Lloyd/Flowline/FlowlineScaled/PNGs/*.png"))
+png_files = sorted(glob.glob("./PNGs/*.png"))
 # Load images
 
 images = [Image.open(p) for p in png_files]

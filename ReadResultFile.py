@@ -19,8 +19,7 @@ def read_partitioned_vars(result_base):
 
     for fname in result_files:
         
-        #if fname != "/import/ontap-m-glaciology/Lloyd/Flowline/FlowlineScaled/footprint/InitialT2Full.result.10" and fname != "/import/ontap-m-glaciology/Lloyd/Flowline/FlowlineScaled/footprint/InitialT2Full.result.11":
-        #    continue
+
         print(fname)
         get_var_list = False
         get_var_vals = False
@@ -95,7 +94,7 @@ def read_partitioned_vars(result_base):
 
 
 # -------- PATHS --------
-RESULT_BASE   ="/import/ontap-m-glaciology/Lloyd/Flowline/FlowlineScaled/footprint/InitialT2Full.result"
+RESULT_BASE   ="./footprint/InitialT2Full.result"
 
 data, Timesteps = read_partitioned_vars(RESULT_BASE)
 
