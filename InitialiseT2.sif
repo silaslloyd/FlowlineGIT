@@ -233,7 +233,7 @@ End
 
 ! For ice
 Initial Condition 3
-Sigma = Real 0.0
+  Stress = Real 0.0
   Bedrock = Variable Coordinate 1
     Real
       include "Initialisation/Dimensional_ICs/bed_dim.xy"
@@ -335,7 +335,7 @@ Body Force 4 !2
  ! Zb Accumulation Condition = Opposes "GroundedMask"
   Flow Solver Name = String "Flow Solution"
   Temperature Upper Limit = Real 273.15
-  Water Sheet Thickness Diffusion Source = Variable "temperature loads", "temperature boundary weights", "temperature load", "groundedmask" ! input for hydrology solver
+  Water Sheet Thickness Diffusion Source = Variable "temperature loads", "temperature boundary weights", "Friction loads", "groundedmask" ! input for hydrology solver
     Real LUA "getmeltrate(tx[0],tx[1],tx[2],tx[3],tx[4]) + Source*tx[2]"   ! Source could be source from e.g. moulins, but set to zero here.
   Physical Units = Logical True !!!!PROXY!!!
 
@@ -345,10 +345,10 @@ Body Force 4 !2
   NodalCoordsBase 3 = Equals Coordinate 3
 
 
-    Melt Source = Variable "temperature loads", "temperature boundary weights", "temperature load", "groundedmask" ! input for hydrology solver
+    Melt Source = Variable "temperature loads", "temperature boundary weights", "Friction loads", "groundedmask" ! input for hydrology solver
     Real LUA "getmeltrate(tx[0],tx[1],tx[2],tx[3],tx[4]) + Source*tx[2]"
 
-    Melt Rate = Variable "temperature loads", "temperature boundary weights", "temperature load", "groundedmask" ! input for hydrology solver
+    Melt Rate = Variable "temperature loads", "temperature boundary weights", "Friction loads", "groundedmask" ! input for hydrology solver
     Real LUA "getmeltrate(tx[0],tx[1],tx[2],tx[3],tx[4]) + Source*tx[2]"
   
   !Water pressure = Variable "Hydraulic Potential", "Zb"
@@ -455,8 +455,8 @@ Material 3
   !Basal Velocity 1 = Equals Velocity 1
   !Basal Velocity 2 = Equals Velocity 2
   !Basal Velocity 3 = Equals Velocity 3
-  !Phi0 = Variable "Stress 3", "Zb"   ! I THINK Stress 3 is the upward (z-direction) ice pressure, making the negative the ice overburden (downward) pressure
-  !  Real LUA "-tx[0] + rhow*gravity*tx[1]"   ! 'reference' hydraulic potential
+  Phi0 = Variable "Stress 3", "Zb"   ! I THINK Stress 3 is the upward (z-direction) ice pressure, making the negative the ice overburden (downward) pressure
+    Real LUA "-tx[0] + rhow*gravity*tx[1]"   ! 'reference' hydraulic potential
   ! PUT ABOVE PHI0 BACK IN WHEN STOKES ADDED!!!
   
   
@@ -840,9 +840,9 @@ Solver 14
   !-----------------------------------------------------------------------
   Flow Solver Name = String "Flow Solution"
   ! no default value anymore for "Stress Variable Name"
-  Stress Variable Name = String "Sigma"
+  Stress Variable Name = String "Stress"
   !-----------------------------------------------------------------------
-  Exported Variable 1 = "Sigma" ! [Sxx, Syy, Szz, Sxy] in 2D
+  Exported Variable 1 = "Stress" ! [Sxx, Syy, Szz, Sxy] in 2D
                                  ! [Sxx, Syy, Szz, Sxy, Syz, Szx] in 3D
   Exported Variable 1 DOFs = 6   ! 4 in 2D, 6 in 3D
   Linear System Solver = "Iterative"
