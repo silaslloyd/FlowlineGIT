@@ -40,7 +40,7 @@ def load_lua_constants(filepath):
 Plot = False
 ### Load Scaling Parameters from parameters.lua ###
 
-params = load_lua_constants("parameters.lua")
+params = load_lua_constants("../parameters.lua")
 viscosity = params["viscosity"]
 rhoi = params["rhoi"]
 gravity = params["gravity"]

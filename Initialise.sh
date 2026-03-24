@@ -11,7 +11,7 @@
 
 
 set -e
-nodes=$SLURM_NTASKS
+nodes=$(lua -e "dofile('parameters.lua'); print(nodes)")
 
 export DIM=2
 
@@ -28,7 +28,7 @@ echo "Building Mesh"
 python3 Initialisation/createGeoFile.py
 gmsh footprint.geo -1 -2 -o footprint.msh -v 0
 
-ElmerGrid 14 2 footprint.msh -partition $nodes 1 1 -parttol 1 -autoclean # > /dev/null 2>&1
+ElmerGrid 14 2 footprint.msh -partition $nodes 1 1 -parttol 1 -autoclean  > /dev/null 2>&1
 ElmerGrid 14 5 footprint.msh -partition $nodes 1 1 -parttol 1 -autoclean  > /dev/null 2>&1
 
 echo "Done"
