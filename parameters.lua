@@ -82,9 +82,9 @@ k = 0.01 -- sheet conductivity in m^(7/4) kg^(-1/2)
 lr = 2 -- cavity spacing in m
 hr = 0.1 -- Bedrock bump height in m
 
-N0 = 1 -- Effective pressure constant (MPa) - GUESSED VALUE!
+N0 = 10 -- Effective pressure constant (MPa) - GUESSED VALUE!
 k0 = 4/3 -- Hydraulic conductivity exponent - value from Schoof and Mantelli 2021
-D0 = 1 -- Hydraulic conductivity constant (??) - GUESSED VALUE!
+D0 = 1e4 -- Hydraulic conductivity constant (??) - GUESSED VALUE!
 
 Ncutepsdiff = 2/3 -- must be >1/3, used for regularisation
 eps = 0.1 ---0.01 -- tolerance used in hydraulic conductivity parametrisation
