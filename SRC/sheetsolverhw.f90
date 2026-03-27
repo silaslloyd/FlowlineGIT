@@ -556,7 +556,7 @@ CONTAINS
 
 
       !PICARD NONLINEAR DIFFUSION
-      STIFF(1:nd,1:nd) = STIFF(1:nd,1:nd) - Weight * &
+      STIFF(1:nd,1:nd) = STIFF(1:nd,1:nd) + Weight * &
              HydraulicConductivityAtIP*dEffectivePressuredxAtIP * MATMUL( dBasisdx, TRANSPOSE( dBasisdx ) )
  
       !WRITE(*,*) STIFF(1:nd,1:nd)
