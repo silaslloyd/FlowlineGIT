@@ -233,7 +233,7 @@ End
 
 ! For ice
 Initial Condition 3
-  Stress = Real 0.0
+Stress = Real 0.0
   Bedrock = Variable Coordinate 1
     Real
       include "Initialisation/Dimensional_ICs/bed_dim.xy"
@@ -262,9 +262,10 @@ Initial Condition 4
     !  include "Initialisation/Dimensional_ICs/gm_dim.xy"
     ! End
     coldtempmask = Variable "Temperature"
-        Real Lua "IfThenElse(tx[0]<T0,-1,1)
-    Water Sheet Thickness = Variable coldtempmask
-    Real Lua "0.5*hr*math.max(tx[0], 0.0)+1.0e-3"
+        Real Lua "IfThenElse(tx[0]<T0,-1,1)"
+    Water Sheet Thickness = Variable "Temperature"
+      Real Lua "1e-5"
+
 
 End
 
@@ -335,9 +336,6 @@ Body Force 4 !2
  ! Zb Accumulation Condition = Opposes "GroundedMask"
   Flow Solver Name = String "Flow Solution"
   Temperature Upper Limit = Real 273.15
-  Water Sheet Thickness Diffusion Source = Variable "temperature loads", "temperature boundary weights", "Friction loads", "groundedmask" ! input for hydrology solver
-    Real LUA "getmeltrate(tx[0],tx[1],tx[2],tx[3],tx[4]) + Source*tx[2]"   ! Source could be source from e.g. moulins, but set to zero here.
-  Physical Units = Logical True !!!!PROXY!!!
 
 
   NodalCoordsBase 1 = Equals Coordinate 1
@@ -345,14 +343,16 @@ Body Force 4 !2
   NodalCoordsBase 3 = Equals Coordinate 3
 
 
-    Melt Source = Variable "temperature loads", "temperature boundary weights", "Friction loads", "groundedmask" ! input for hydrology solver
+    Melt Source = Variable "temperature loads", "temperature boundary weights", "Friction Loads", "groundedmask" ! input for hydrology solver
     Real LUA "getmeltrate(tx[0],tx[1],tx[2],tx[3],tx[4]) + Source*tx[2]"
 
-    Melt Rate = Variable "temperature loads", "temperature boundary weights", "Friction loads", "groundedmask" ! input for hydrology solver
+    Melt Rate = Variable "temperature loads", "temperature boundary weights", "Friction Loads", "groundedmask" ! input for hydrology solver
     Real LUA "getmeltrate(tx[0],tx[1],tx[2],tx[3],tx[4]) + Source*tx[2]"
+
+
+    !HydroCond = Equals "Hydraulic Conductivity"
+    !EffPress = Equals "Effective Pressure"
   
-  !Water pressure = Variable "Hydraulic Potential", "Zb"
-  !  Real LUA "tx[0] - rhow*gravity*tx[1]"
 End
 
 Body Force 5
@@ -415,7 +415,6 @@ Material 3
 
   ! for the stress solver
   Cauchy = Logical True
-
   Glen Allow Old Keywords = Logical True
   Temperature Field Variable = Temperature
 
@@ -440,7 +439,6 @@ Material 3
   
   Temperature Upper Limit = Real 273.15
 
-  Water Sheet Thickness Diffusivity = Real 0.0
   
    
  Mesh Elastic Modulus = Real 100.0
@@ -455,34 +453,34 @@ Material 3
   !Basal Velocity 1 = Equals Velocity 1
   !Basal Velocity 2 = Equals Velocity 2
   !Basal Velocity 3 = Equals Velocity 3
-  Phi0 = Variable "Stress 3", "Zb"   ! I THINK Stress 3 is the upward (z-direction) ice pressure, making the negative the ice overburden (downward) pressure
+  Phi0 = Variable "Stress 3", "Bedrock"   ! I THINK Stress 3 is the upward (z-direction) ice pressure, making the negative the ice overburden (downward) pressure
     Real LUA "-tx[0] + rhow*gravity*tx[1]"   ! 'reference' hydraulic potential
+  !Phi0 = Variable "Bedrock",    ! I THINK Stress 3 is the upward (z-direction) ice pressure, making the negative the ice overburden (downward) pressure
+  !  Real LUA "rhoi*gravity*tx[0]"   ! 'reference' hydraulic potential
   ! PUT ABOVE PHI0 BACK IN WHEN STOKES ADDED!!!
   
   
-  Phi0 = Variable "Zs", "Zb"   ! ALTERNATIVE THAT WORKS WITH NO STOKES
-    Real LUA "rhoi*gravity*(tx[0]-tx[1]) + rhow*gravity*tx[1]"   ! 'reference' hydraulic potential
+  !Phi0 = Variable "Zs", "Zb"   ! ALTERNATIVE THAT WORKS WITH NO STOKES
+  !  Real LUA "rhoi*gravity*(tx[0]-tx[1]) + rhow*gravity*tx[1]"   ! 'reference' hydraulic potential
   
   ! Functional relationships for effective pressure and hydraulic conductivity.
   ! These should then be applied as functions inside the sheet solver (.f90).
   ! TO BE PLAYED WITH!
   Effective Pressure = Variable "Water Sheet Thickness"
-    Real LUA "N0*(hr - tx[0])/tx[0]"
+    Real LUA "max(N0*(hr - tx[0])/tx[0],eps)"
   !Hydraulic Conductivity = Real #D0
   Hydraulic Conductivity = Variable "Effective Pressure"
-    Real LUA "IfThenElse(tx[0]<delta,D0*(Ncoeff*tx[0]^2 + (1-2*delta*Ncoeff)*tx[0] + eps)^(-k0) , D0*tx[0]^(-k0))"
-    !Real LUA "D0*(tx[0]+eps)^(-k0)"
+    Real LUA "D0*(tx[0])^(-k0)"
     !Real LUA "D0*tx[0]^(-k0)"
     !Real LUA "D0*(0.5*(tx[0]+delta*log(cosh((tx[0]-eps)/delta))))^(-k0)
   Effective Pressure First Derivative = Variable "Water Sheet Thickness"
     Real LUA "-N0*hr/(tx[0]^2)"
   Effective Pressure Second Derivative = Variable "Water Sheet Thickness"
     Real LUA "2*N0*hr/(tx[0])^3"
-  !Hydraulic Conductivity Derivative = Real 0.00
-  Hydraulic Conductivity Derivative = Variable "Effective Pressure"
-    Real LUA "IfThenElse(tx[0]<delta,-k0*D0*(2*Ncoeff*tx[0] + 1 - 2*Ncoeff*delta)*(Ncoeff*tx[0]^2 + (1-2*delta*Ncoeff)*tx[0] + eps)^(-k0-1), -k0*D0*(N+eps)^(-(k0+1)))"
+  !Hydraulic Conductivity First Derivative = Real 0.00
+  Hydraulic Conductivity First Derivative = Variable "Effective Pressure"
+    Real LUA " -k0*D0*(tx[0])^(-(k0+1))"
     !Real LUA "-k0*D0*(N+eps)^(-(k0+1))"
-    !Real LUA "-k0*D0*N^(-(k0+1))"
 End
 
 
@@ -762,9 +760,9 @@ Solver 12
   Procedure =  "FreeSurfaceSolver" "FreeSurfaceSolver"
   Variable = "Zb"
   Variable DOFS =  1
-  Exported Variable 1 = "Zb Residual"
-  Exported Variable 1 DOFs = 1
-    Exported Variable 2 = -dofs 3 NodalCoordsBase
+  Steady State Convergence Tolerance = 1.0E-03
+  Exported Variable 1 = -dofs 1 "Zb Residual"      ! Other variables calculeted in the solver that we want to export ?
+
 
   ! Before Linsolve = "EliminateDirichlet" "EliminateDirichlet"
 
@@ -801,7 +799,7 @@ Solver 13
   Variable DOFs =  1
   Exported Variable 1 = "Zs Residual"
   Exported Variable 1 DOFs = 1
-      Exported Variable 2 = -dofs 3 "NodalCoordsSurf"
+  Exported Variable 2 = -dofs 3 "NodalCoordsSurf"
 
 
   ! Before Linsolve = "EliminateDirichlet" "EliminateDirichlet"
@@ -830,7 +828,7 @@ End
 
 Solver 14
   Equation = String "StressSolver"
-  Exec Solver = "never"
+  !Exec Solver = "never"
   Procedure =  File "ElmerIceSolvers" "ComputeDevStress"
   ! this is just a dummy, hence no output is needed
   !-----------------------------------------------------------------------
@@ -845,7 +843,8 @@ Solver 14
   Exported Variable 1 = "Stress" ! [Sxx, Syy, Szz, Sxy] in 2D
                                  ! [Sxx, Syy, Szz, Sxy, Syz, Szx] in 3D
   Exported Variable 1 DOFs = 6   ! 4 in 2D, 6 in 3D
-  Linear System Solver = "Iterative"
+ Linear System Solver = "Direct"
+ Linear System Direct Method = $directsolver
   Linear System Iterative Method = "BiCGStab"
   Linear System Max Iterations = 300
   Linear System Convergence Tolerance = 1.0E-09
@@ -868,7 +867,7 @@ End
 ! Hydrology solver (water sheet thickness)
 !-----------------------------------------
 Solver 16
- !Exec Solver = After Timestep
+ Exec Solver = After Timestep
   !Procedure =File "AdvectionDiffusion" "AdvectionDiffusionSolver"
   Equation = String "Sheet solver water sheet thickness"
   Variable = String "Water Sheet Thickness"   ! Variable directly outputted by solver ?
@@ -877,15 +876,15 @@ Solver 16
   !!Linear System Solver = "Direct"
   Linear System Direct Method = $directsolver
 
-  Linear System Solver = "Iterative"
+  Linear System Solver = "Direct"
   Linear System Iterative Method = "GCR"
   Linear System GCR Restart = Integer 200
   Linear System Max Iterations = 15000
-  Linear System Convergence Tolerance = 1.0e-3 !1.0E-08
+  Linear System Convergence Tolerance = 1.0e-8 !1.0E-08
   Linear System Abort Not Converged = True
   Linear System Preconditioning = "ILU1"
   Linear System Residual Output = 100
-  Nonlinear System Convergence Tolerance = 1.0e-3 !1.0E-05
+  Nonlinear System Convergence Tolerance = 1.0e-6 !1.0E-05
   Nonlinear System Max Iterations = 50
   Nonlinear System Min Iterations = 1
   Nonlinear System Relaxation Factor = Real 0.5
@@ -895,19 +894,18 @@ Solver 16
 
 !  Sheet Integration Method = String "Implicit"
 
-  Steady State Convergence Tolerance = 1.0E-01
-  Exported Variable 1 = -dofs 1 "Meltrate"      ! Other variables calculeted in the solver that we want to export ?
-  Exported Variable 2 = -dofs 1 "Effective Pressure"    ! defined in Materials section
+  Steady State Convergence Tolerance = 1.0E-04
+  Exported Variable 1 = -dofs 1 "Melt rate"      ! Other variables calculeted in the solver that we want to export ?
+  Exported Variable 2 = -dofs 1 "EffPress"    ! defined in Materials section
   Exported Variable 3 = -dofs 3 "Water Flux"
-  Exported Variable 4 = -dofs 1 "Hydraulic Conductivity"  ! defined in Materials section
+  Exported Variable 4 = -dofs 1 "HydroCond"  ! defined in Materials section
 
   Nonlinear Update Exported Variables = Logical True
   Update Exported Variables = Logical True
 
   ! Set hydrology solver to passive (i.e. not solved) on COLD nodes/elements(?) and ungrounded region
   !Water Sheet Thickness Passive = Opposes ColdTempMask
-  Water Sheet Thickness Passive = Variable "GroundedMask", "ColdTempMask"   ! passive on ungrounded ice and cold, grounded ice
-    Real LUA "IfThenElse((tx[0]-0.5 < 0),1.0,-tx[1])"
+
 End
 
 
@@ -1179,12 +1177,12 @@ Boundary Condition  19
   
   Calculate Temperature Boundary Weights = Logical True
 
-  !Hydraulic Potential = Equals "Phi0"
-  !Hydraulic Potential Condition = Opposes "GroundedMask"     ! only apply hyraulic potential BC on ungrounded ice
-
-  ! Impose N = 0 on base of ice Shelf
+  Water Sheet Thickness = Real #hr
+  Water Sheet Thickness Condition = Variable "GroundedMask"
+    Real LUA "-tx[0]"
   Effective Pressure = Real 0.0
-  Effective Pressure Condition = Opposes "GroundedMask"
+  Effective Pressure Condition = Variable "GroundedMask"
+    Real LUA "-tx[0]"
 
   FSSA Theta = Real 1.0 
   FSSA Flag = String $fssaflag

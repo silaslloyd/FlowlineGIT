@@ -49,9 +49,9 @@ SUBROUTINE SheetSolverhw( Model,Solver,dt,TransientSimulation )
 !------------------------------------------------------------------------------
   TYPE(Element_t),POINTER :: Element
   REAL(KIND=dp) :: Norm
-  INTEGER :: i, j, m, n, nb, nd, t, active, dimsheet   ! n = number of nodes (given element), n = number of degrees of freedom (given element), nd = number of DOFs on the boundary (given element), t = index for..., active = number of active element
+  INTEGER :: i, j, m, n, nb, nd, t, active, istat   ! n = number of nodes (given element), n = number of degrees of freedom (given element), nd = number of DOFs on the boundary (given element), t = index for..., active = number of active element
   INTEGER :: iter, maxiter  ! nonlinear iteration number, max number of nonlinear iterations
-  LOGICAL :: Found, Newton, BulkUpdate, RHSUpdate
+  LOGICAL :: Found, Newton, BulkUpdate, RHSUpdate, AllocationsDone = .FALSE.
   TYPE(Mesh_t), POINTER :: Mesh 
   TYPE(ValueList_t), POINTER :: BodyForce, Material, SolverParams 
 !------------------------------------------------------------------------------
@@ -61,24 +61,47 @@ SUBROUTINE SheetSolverhw( Model,Solver,dt,TransientSimulation )
   INTEGER, POINTER :: hwPerm(:), qwPerm(:)   ! Used to match up node number with solution value at that node (not obvious due to how Elmer stores values)
   INTEGER, ALLOCATABLE :: hwOldPerm(:)  ! copy of values to retain when pointer is overwritten by new iteration values
   TYPE(Nodes_t) :: ElementNodes
-  INTEGER :: dim, qwNDOFs, k, rankA, rankM
-  REAL(KIND=dp), ALLOCATABLE :: nodalhw(:), dhwdx(:,:), gradPhi0(:,:), dBasisdx(:,:), nodalhwOld(:), dhwdxOld(:,:), nodalqw(:,:)
-  REAL(KIND=dp), ALLOCATABLE :: DensityWater(:), LatentHeat(:), Phi0(:), HydraulicConductivity(:), EffectivePressure(:)
-  REAL(KIND=dp), ALLOCATABLE :: dEffectivePressuredx(:), ddEffectivePressuredx(:), dHydraulicConductivitydx(:)
-  REAL(KIND=dp), ALLOCATABLE :: q0(:,:), qh(:,:), QQh(:)
-  REAL(KIND=dp), ALLOCATABLE :: MASS(:,:), STIFF(:,:), LOAD(:,:), FORCE(:,:)
+  INTEGER :: dim, qwNDOFs, k, rankA, rankM, dimsheet
+  !REAL(KIND=dp), ALLOCATABLE :: nodalhw(:), dhwdx(:,:), gradPhi0(:,:), dBasisdx(:,:), nodalhwOld(:), dhwdxOld(:,:), nodalqw(:,:)
+  !REAL(KIND=dp), ALLOCATABLE :: DensityWater(:), LatentHeat(:), Phi0(:), HydraulicConductivity(:), EffectivePressure(:)
+  !REAL(KIND=dp), ALLOCATABLE :: dEffectivePressuredx(:), ddEffectivePressuredx(:), dHydraulicConductivitydx(:)
+  !REAL(KIND=dp), ALLOCATABLE :: q0(:,:), qh(:,:), QQh(:)
+  REAL(KIND=dp), ALLOCATABLE :: MASS(:,:), STIFF(:,:), LOAD(:), FORCE(:)
 
-SAVE MASS, STIFF, LOAD, FORCE
+  CHARACTER(LEN=MAX_NAME_LEN) :: SolverName
+
+  SAVE hwOld, hwOldPerm, MASS, STIFF, LOAD, FORCE
 
 !PointerToSolver => Solver    ! https://fortran-lang.discourse.group/t/understanding-fortran-pointers/1142
 
-SolverParams => GetSolverParams()    ! Access information (keywords) from the relevant solver section in the sif
+  SolverParams => GetSolverParams()    ! Access information (keywords) from the relevant solver section in the sif
+
+  SolverName = 'SheetSolverhw'
 
 ! Details of mesh - IS THIS NEEDED HERE?
   Mesh => Solver % Mesh
   dim = Mesh % MeshDim     ! 1, 2 or 3 D
   m = Mesh % NumberOfNodes      ! Number of nodes in the mesh
   n = Mesh % MaxElementNodes    ! Maximum number of nodes that there could be in a single element
+
+! Allocate some permenant storage
+  IF ( .NOT. AllocationsDone .OR. Mesh % Changed ) THEN
+
+    IF ( AllocationsDone ) THEN
+      DEALLOCATE( hwOld, hwOldPerm )
+    END IF
+
+    ALLOCATE( hwOld(m), hwOldPerm(m), MASS(n,n), STIFF(n,n), LOAD(n), FORCE(n), STAT=istat )
+
+    IF ( istat /= 0 ) THEN
+      CALL FATAL( 'SheetSolver', 'Memory allocation error' )
+    ELSE
+      CALL INFO( 'SheetSolver', 'Memory allocation done', level=1 )
+    END IF
+
+    AllocationsDone = .TRUE.
+
+  END IF
 
 ! Point to water sheet thickness solution: the values and how those values match up with the nodes
   hwSol => Solver % Variable
@@ -108,7 +131,7 @@ SolverParams => GetSolverParams()    ! Access information (keywords) from the re
   DO iter=1,maxiter
     CALL Info('SheetSolverhw','Sheet solver iteration: '//I2S(iter))
 
-    Newton = GetNewtonActive()  ! logical that is 1 if Newton iterations are to be used (Picard otherwise)
+    Newton = .TRUE. !GetNewtonActive()  ! logical that is 1 if Newton iterations are to be used (Picard otherwise)
 
     ! System assembly:
     !----------------
@@ -120,12 +143,12 @@ SolverParams => GetSolverParams()    ! Access information (keywords) from the re
 
     DO t=1,Active   ! for each active element..
       Element => GetActiveElement(t)   ! information about that element
-      n  = GetElementNOFNodes()        ! number of nodes
+      n  = Element % TYPE % NumberOfNodes !GetElementNOFNodes()        ! number of nodes
       nd = GetElementNOFDOFs()         ! number of degrees of freedom (DOF)
-      nb = GetElementNOFBDOFs()        ! number of DOFs that are on the boundary
-      CALL LocalMatrix(  Element, n, nd+nb, hw(hwPerm(Element % NodeIndexes(1:n))) )
-      dimsheet =  Element % TYPE % DIMENSION
-     ! WRITE(*,*) 'DIMENSION OF SHEET', dimsheet
+      nb = GetElementNOFBDOFs()        ! number of BUBBLES DOFs (NOT boundary DOFs)
+      dimsheet = Element % TYPE % DIMENSION
+      !WRITE(*,*) 'dimsheet', dimsheet
+      CALL LocalMatrix(  Element, n, nd+nb, dim, dimsheet, hw(hwPerm(Element % NodeIndexes(1:n))) )
     END DO
 
     !CALL DefaultFinishBulkAssembly()
@@ -134,11 +157,10 @@ SolverParams => GetSolverParams()    ! Access information (keywords) from the re
     RHSUpdate = .TRUE.    ! force vector is saved if true
     CALL DefaultFinishBulkAssembly(Solver,BulkUpdate,RHSUpdate)
     
-    rankM = RANK(MASS)
-    rankA = RANK(STIFF)
-
-    CALL Info('SheetSolverhw','After Bulk Assembly, rank of Matrix: '//I2S(rankM)//', rank of A: '//I2S(rankA)//'& 
-       , nd: '//I2S(nd)//', n: '//I2S(n)//', total nodes: '//I2S(m),Level=1)   !
+    !rankM = RANK(MASS)
+    !rankA = RANK(STIFF)
+    !CALL Info('SheetSolverhw','After Bulk Assembly, rank of Matrix: '//I2S(rankM)//', rank of A: '//I2S(rankA)//'& 
+    !   , nd: '//I2S(nd)//', n: '//I2S(n)//', total nodes: '//I2S(m),Level=1)   !
     
     ! NO BC APPLIED! We want the natural BC (no normal flux) at the coldtemp boundary.
     ! At the grounding line, we want effective pressure = 0, but this is applied as a 
@@ -173,61 +195,180 @@ SolverParams => GetSolverParams()    ! Access information (keywords) from the re
 DO t=1, Solver % NumberOfActiveElements   ! for each active element...
   Element => GetActiveElement(t,Solver)
   n = GetElementNOFNodes(Element)   ! number of nodes in element
+  dimsheet = Element % TYPE % DIMENSION
+
   CALL GetElementNodes( ElementNodes )   ! ElementNodes = nodal coordinates (x,y,z) for nodes in the element
-  CALL GetParameters(Element, Material, n, DensityWater, LatentHeat, Phi0, EffectivePressure, HydraulicConductivity, &
-    dEffectivePressuredx, ddEffectivePressuredx, dHydraulicConductivitydx) ! Get parameter values (at nodes) from sif file
 
-  DO i=1, n   ! ... for each node within the element
-    j = Element % NodeIndexes(i)  ! Node index of the node within given element
-
-    ! The different components of the flux when linearised:
-    !-------------------------------------------------------
-    nodalhw(i) = hw(hwPerm(j))   ! hw at current iteration (just calculated)
-    dhwdx(i,1:2) = nodalhw(i) * dBasisdx(i,1:2)   ! grad(hw) at current iteration (just calculated)
-    gradPhi0(i,1:2) = Phi0(i) * dBasisdx(i,1:2)  ! where N = Phi0 - Phi
-    nodalhwOld = hwOld(hwOldPerm(j))   ! hw at previous iteration
-    dhwdxOld(i,1:2) = nodalhwOld(i) * dBasisdx(i,1:2)   ! grad(hw) at previous iteration
-
-    ! Coefficient of hw in flux linearisation
-    IF (Newton) THEN
-      qh(i,1:2) = dHydraulicConductivitydx(i)*dEffectivePressuredx(i)*(gradPhi0(i,1:2) - &
-        dEffectivePressuredx(i)*dhwdx(i,1:2)) - HydraulicConductivity(i)*ddEffectivePressuredx(i)*dhwdx(i,1:2)
-    ELSE
-      qh(i,1:2) = 0
-    END IF
-
-    ! Coefficient of grad(hw) in flux linearisation
-    IF (Newton) THEN
-      QQh(i) = -HydraulicConductivity(i)*dEffectivePressuredx(i)
-    ELSE
-      QQh(i) = -HydraulicConductivity(i)*dEffectivePressuredx(i)
-    END IF
-
-    ! Order 1 term in flux linearisation
-    IF (Newton) THEN
-      q0(i,1:2) = HydraulicConductivity(i)*gradPhi0(i,1:2) - qh(i,1:2)
-    ELSE
-      q0(i,1:2) = HydraulicConductivity(i)*gradPhi0(i,1:2)
-    END IF
-
-  ! CALCULATE WATER FLUX (NEW ITERATION) FROM THESE COMPONENTS AND hw, gradhw
-  ! AT NEW AND PREVIOUS ITERARION.
+  !CALL GetParameters(Element, Material, n, DensityWater, LatentHeat, Phi0, EffectivePressure, HydraulicConductivity, &
+  !  dEffectivePressuredx, ddEffectivePressuredx, dHydraulicConductivitydx) ! Get parameter values (at nodes) from sif file
   
-  ! The pointer qw contains all the components of the Water Flux for all the nodes (global)
-  ! stacked together, i.e qx1, qy1, qz1, qx2, qy2, qz2, ...
-  ! To reassmeble 
-    DO k = 1,2   ! dim and qwNDOFs should be equal
-      nodalqw(i,k) = q0(i,k) + qh(i,k)*nodalhwOld(i) + QQh(i)*dhwdxOld(i,k)  ! value of each component (k) of qw at each node (i) within the element
-      qw((qwPerm(j)-1)*qwNDOFs+k) = nodalqw(i,k)  ! value of  each global node (qwPerm(j)) 
-    END DO
+  ! Nodal values of water sheet thickness hw from CURRENT (just calculated) and PREVIOUS iteration
+  !DO i=1, n   ! ... for each node within the element (LOCAL nodal index)
+  !  j = Element % NodeIndexes(i)  ! almost GLOBAL nodal index (but still need to apply perm)
+  !  nodalhw(j) = hw(hwPerm(j))   ! hw at CURRENT iteration (just calculated)
+  !  nodalhwOld(j) = hwOld(hwOldPerm(j))   ! hw at PREVIOUS iteration
+  !END DO
 
-  END DO
+  !CALL CalculateWaterFluxComponents(Element, n, dimsheet, nodalhwOld, q0, qh, QQh)
+
+  !CALL CalculateWaterFlux(Element, n, dimsheet, hw(hwPerm(Element % NodeIndexes(1:n))), &
+  !  hwOld(hwOldPerm(Element % NodeIndexes(1:n))), qw, qwPerm)
 
 END DO 
 
 CALL DefaultFinish()
  
 CONTAINS
+
+! Calculate the linearised components of the water flux (used in the local matrices)
+! ------------------------------------------------------------------------------------------
+  SUBROUTINE CalculateWaterFluxComponents(Element, n, dimsheet, nodalhw, q0, qh, QQh)
+! ------------------------------------------------------------------------------------------
+    REAL(KIND=dp) :: nodalhw(n), dhwdx(n,dimsheet), gradPhi0(n,dimsheet), dBasisdx(n,dimsheet)
+    REAL(KIND=dp) :: DensityWater(n), LatentHeat(n), Phi0(n), HydraulicConductivity(n), EffectivePressure(n)
+    REAL(KIND=dp) :: dEffectivePressuredx(n), ddEffectivePressuredx(n), dHydraulicConductivitydx(n)
+    REAL(KIND=dp) :: q0(n,dimsheet), qh(n,dimsheet), QQh(n)
+
+    INTEGER :: i, j, n, dimsheet
+    
+    TYPE(Element_t), POINTER :: Element
+    TYPE(ValueList_t), POINTER :: Material
+
+    CALL GetElementNodes( ElementNodes )
+     
+    ! -----------------------------------------------------------
+    ! Access parameter values from material section of sif file (nodal values)
+    ! -----------------------------------------------------------
+    CALL GetParameters(Element, Material, n, DensityWater, LatentHeat, Phi0, EffectivePressure, HydraulicConductivity, &
+    dEffectivePressuredx, ddEffectivePressuredx, dHydraulicConductivitydx)
+
+    ! --------------------------------------------------------------------------------
+    ! Calculate the linearised water flux coefficients at each node within the element in question.
+    ! --------------------------------------------------------------------------------
+    DO i=1, n   ! ... for each node within the element (LOCAL nodal index)
+      j = Element % NodeIndexes(i)  ! almost GLOBAL nodal index (but still need to apply perm)
+
+      ! Nodal gradients of water sheet thickness hw and Phi0 (at previous iteration)
+      ! (NOTE: dimsheet (2) instead of dim(3) is used for the gradients to avoid nonsensical 
+      ! z derivatives on the 2D surface that the hydrology solver is applied on.)
+      !-------------------------------------------------------
+      dhwdx(i,1:dimsheet) = nodalhw(i) * dBasisdx(i,1:dimsheet)   ! grad(hw)
+      gradPhi0(i,1:dimsheet) = Phi0(i) * dBasisdx(i,1:dimsheet)  ! where N = Phi0 - Phi
+      !WRITE(*,*) 'dhwdx', dhwdx(i,1:dimsheet)
+      !WRITE(*,*) 'gradPhi0', gradPhi0(i,1:dimsheet)
+      !WRITE(*,*) 'Phi0', Phi0(i)
+      !WRITE(*,*) 'dHydraulicConductivitydx', dHydraulicConductivitydx(i)
+      !WRITE(*,*) 'HydraulicConductivity', HydraulicConductivity(i)
+      !WRITE(*,*) 'dEffectivePressuredx', dEffectivePressuredx(i)
+      !WRITE(*,*) 'EffectivePressure', EffectivePressure(i)
+      !WRITE(*,*) 'ddEffectivePressuredx', ddEffectivePressuredx(i)
+      !WRITE(*,*) 'hw', nodalhw(i)
+      !WRITE(*,*) 'dBasisdx', dBasisdx(i,1:dim)
+
+      ! Coefficient of hw in flux linearisation
+      ! ------------------------------------------
+      IF (Newton) THEN
+        qh(i,1:dimsheet) = dHydraulicConductivitydx(i)*dEffectivePressuredx(i)*(gradPhi0(i,1:dimsheet) - &
+          dEffectivePressuredx(i)*dhwdx(i,1:dimsheet)) - HydraulicConductivity(i)*ddEffectivePressuredx(i)*dhwdx(i,1:dimsheet)
+      ELSE
+        qh(i,1:dimsheet) = 0
+      END IF
+      !WRITE(*,*) 'qh', qh(i,1:dimsheet)
+
+      ! Coefficient of grad(hw) in flux linearisation
+      ! ----------------------------------------------
+      IF (Newton) THEN
+        QQh(i) = -HydraulicConductivity(i)*dEffectivePressuredx(i)
+      ELSE
+        QQh(i) = -HydraulicConductivity(i)*dEffectivePressuredx(i)
+      END IF
+      !WRITE(*,*) 'QQh', QQh(i)
+
+      ! Order 1 term in flux linearisation
+      ! ------------------------------------
+      IF (Newton) THEN
+        q0(i,1:dimsheet) = HydraulicConductivity(i)*gradPhi0(i,1:dimsheet) - qh(i,1:dimsheet)
+      ELSE
+        q0(i,1:dimsheet) = HydraulicConductivity(i)*gradPhi0(i,1:dimsheet)
+      END IF
+      !WRITE(*,*) 'q0', q0(i,1:dimsheet)
+    END DO
+
+! ----------------------------------------------
+  END SUBROUTINE CalculateWaterFluxComponents
+! ----------------------------------------------
+
+! Calculate the water flux from the linearised components and the hw solutions at the
+! current and previous iterations
+! -------------------------------------------------------------------------------
+  SUBROUTINE CalculateWaterFlux(Element, n, dimsheet, nodalhw, nodalhwOld, qw, qwPerm)
+! -------------------------------------------------------------------------------
+!   Element = info about the element
+!   n = number of nodes in the element
+!   dimsheet = dimension of the element (e.g. 2D)
+!   nodalhw = values of water sheet thickness on the nodes from the current iteration (just calculated), 
+!             indexed by the local nodal indices
+!   nodalhwOld = values of water sheet thickness on the nodes from the previous iteration, 
+!             indexed by the local nodal indices
+!   qw = nodal values of the water flux, which this subroutine calculates (pointer)
+!   qwPerm = permutation for mapping local to global nodal indices (pointer)
+! ---------------------------------------------------------------------------------
+  
+    REAL(KIND=dp) :: nodalhw(n), dhwdx(n,dimsheet), gradPhi0(n,dimsheet), dBasisdx(n,dimsheet)
+    REAL(KIND=dp) :: nodalhwOld(n), dhwdxOld(n,dimsheet), nodalqw(n,dimsheet)
+    REAL(KIND=dp) :: q0(n,dimsheet), qh(n,dimsheet), QQh(n)
+
+    REAL(KIND=dp), POINTER :: qw(:)
+    INTEGER, POINTER :: qwPerm(:)
+
+    INTEGER :: i, j, n, dimsheet
+    
+    TYPE(Element_t), POINTER :: Element
+    TYPE(ValueList_t), POINTER :: Material
+
+    CALL GetElementNodes( ElementNodes )
+
+    ! Calculate the coefficients of hw, grad(hw) and the constant term in the linearisation
+    ! used for the water flux qw in the FEM system (e.g. Newton or Picard)
+    ! ---------------------------------------------------------------------------------
+    CALL CalculateWaterFluxComponents(Element, n, dimsheet, nodalhw, q0, qh, QQh)
+
+    ! Loop over elements to compute the water flux
+    ! --------------------------------------------------
+    DO i=1, n   ! ... for each node within the element (LOCAL nodal index)
+      j = Element % NodeIndexes(i)  ! almost GLOBAL nodal index (but still need to apply perm)
+  
+      ! Calculate the derivatives of the old and current water sheet thickness hw
+      ! ---------------------------------------------------------------------------
+      dhwdx(i,1:dimsheet) = nodalhw(i) * dBasisdx(i,1:dimsheet)   ! grad(hw) at current iteration (just calculated)
+      dhwdxOld(i,1:dimsheet) = nodalhwOld(i) * dBasisdx(i,1:dimsheet)  ! grad(hw) at previous iteration
+  
+      ! Reassemlbe all the linearised components to give the water flux qw
+      ! ------------------------------------------------------------------------
+      ! The pointer qw contains all the components of the Water Flux for all the nodes (global)
+      ! stacked together, i.e qx1, qy1, qz1, qx2, qy2, qz2, ...
+      ! So ,to reassmeble:
+
+      DO k = 1,dimsheet
+        ! Calculate nodalqw only for the dimensions of the water sheet
+        nodalqw(i,k) = q0(i,k) + qh(i,k)*nodalhwOld(i) + QQh(i)*dhwdxOld(i,k)  ! value of each component (k) of qw at each node (i) within the element
+      END DO
+      
+      DO k = dimsheet+1,qwNDOFs  ! qwNDOFs should be equal to dim (3)
+        ! Set the z component of the water flux to zero, since this is meaningless on out 2D surface
+        nodalqw(i,k) = 0
+      END DO
+
+      DO k = 1,qwNDOFs
+        qw((qwPerm(j)-1)*qwNDOFs+k) = nodalqw(i,k)  ! value of each global node (qwPerm(j))
+      END DO
+
+    END DO
+  
+! ----------------------------------------
+  END SUBROUTINE CalculateWaterFlux
+! ----------------------------------------
+
 
 ! Get parametrs from sif file
 ! -----------------------------------------------------------------------------
@@ -242,41 +383,74 @@ CONTAINS
   TYPE(ValueList_t), POINTER :: Material
   TYPE(Nodes_t) :: Nodes
 
-  CALL GetElementNodes( Nodes )
+  !CALL GetElementNodes( Nodes )
 
   Material => GetMaterial()
 
   ! Get parameter values from the Material section of the sif file, using the keywords used there
   DensityWater(1:n) = ListGetReal( Material, 'Density Water', n, Element % NodeIndexes, Found)
+  IF(.NOT.Found) THEN
+    CALL WARN(SolverName,'Keyword >Density Water< not found in section Constants')
+  END IF
+
   LatentHeat(1:n) = ListGetReal( Material, 'Latent Heat Capacity', n, Element % NodeIndexes, Found)
+  IF(.NOT.Found) THEN
+    CALL WARN(SolverName,'Keyword >Latent Heat Capacity< not found in section Constants')
+  END IF
+
   Phi0(1:n) = ListGetReal( Material, 'Phi0', n, Element % NodeIndexes, Found)  ! where Effective Pressure = Phi0 - Hydraulic Conductivity
+  IF(.NOT.Found) THEN
+    CALL WARN(SolverName,'Keyword >Phi0< not found in section Constants')
+  END IF
+
   EffectivePressure(1:n) = ListGetReal( Material, 'Effective Pressure', n, Element % NodeIndexes, Found)
+  IF(.NOT.Found) THEN
+    CALL WARN(SolverName,'Keyword >Effective Pressure< not found in section Constants')
+  END IF
+
   HydraulicConductivity(1:n) = ListGetReal( Material, 'Hydraulic Conductivity', n, Element % NodeIndexes, Found)
+  IF(.NOT.Found) THEN
+    CALL WARN(SolverName,'Keyword >Hydraulic Conductivity< not found in section Constants')
+  END IF
+
   dEffectivePressuredx(1:n) = ListGetReal( Material, 'Effective Pressure First Derivative', n, Element % NodeIndexes, Found)
+  IF(.NOT.Found) THEN
+    CALL WARN(SolverName,'Keyword >Effective Pressure First Derivative< not found in section Constants')
+  END IF
+
   ddEffectivePressuredx(1:n) = ListGetReal( Material, 'Effective Pressure Second Derivative', n, Element % NodeIndexes, Found)
+  IF(.NOT.Found) THEN
+    CALL WARN(SolverName,'Keyword >Effective Pressure Second Derivative< not found in section Constants')
+  END IF
+
   dHydraulicConductivitydx(1:n) = ListGetReal( Material, 'Hydraulic Conductivity First Derivative', n, Element % NodeIndexes, Found) ! as a function of N, not hw
+  IF(.NOT.Found) THEN
+    CALL WARN(SolverName,'Keyword >Hydraulic Conductivity First Derivative< not found in section Constants')
+  END IF
 
 !-------------------------------------------------------------------------------
   END SUBROUTINE GetParameters
 !-------------------------------------------------------------------------------
 
 
-
 ! Assembly of the matrix entries arising from the bulk elements
 !------------------------------------------------------------------------------
-  SUBROUTINE LocalMatrix( Element, n, nd, nodalhw )
+  SUBROUTINE LocalMatrix( Element, n, nd, dim, dimsheet, nodalhw )
 !------------------------------------------------------------------------------
-    INTEGER :: n, nd
+    INTEGER :: n, nd, dimsheet
     TYPE(Element_t), POINTER :: Element
 !------------------------------------------------------------------------------
-    REAL(KIND=dp) :: DensityWater(n), LatentHeat(n), nodalhw(n), Phi0(n), dhwdx(n,3)
-    REAL(KIND=dp) :: gradPhi0(n,3), HydraulicConductivity(n), EffectivePressure(n)
+    REAL(KIND=dp) :: DensityWater(n), LatentHeat(n), nodalhw(n), Phi0(n) !, dhwdx(n,dimsheet)
+    REAL(KIND=dp) :: gradPhi0(n,dimsheet), HydraulicConductivity(n), EffectivePressure(n)
     REAL(KIND=dp) :: dEffectivePressuredx(n), ddEffectivePressuredx(n), dHydraulicConductivitydx(n)
-    REAL(KIND=dp) :: DensityWaterAtIP, LatentHeatAtIP, hwAtIP, LoadAtIP, Weight
+    REAL(KIND=dp) :: DensityWaterAtIP, LatentHeatAtIP, hwAtIP
+    REAL(KIND=dp) :: LoadAtIP, Weight
     REAL(KIND=dp) :: HydraulicConductivityAtIP, EffectivePressureAtIP, dEffectivePressuredxAtIP
-    REAL(KIND=dp) :: ddEffectivePressuredxAtIP, dHydraulicConductivitydxAtIP, QQhAtIp
-    REAL(KIND=dp) :: q0AtIP(dim), dhwdxAtIP(3), gradPhi0AtIP(3), qhAtIP(3)
-    REAL(KIND=dp) :: Basis(nd),dBasisdx(nd,3),DetJ
+    REAL(KIND=dp) :: ddEffectivePressuredxAtIP, dHydraulicConductivitydxAtIP
+    REAL(KIND=dp) :: q0(n,dimsheet), qh(n,dimsheet), QQh(n)
+    REAL(KIND=dp) :: QQhAtIp
+    REAL(KIND=dp) :: q0AtIP(dimsheet), dhwdxAtIP(dimsheet), gradPhi0AtIP(dimsheet), qhAtIP(dimsheet)
+    REAL(KIND=dp) :: Basis(nd),dBasisdx(nd,dim),DetJ
     REAL(KIND=dp) :: MASS(nd,nd), STIFF(nd,nd), FORCE(nd), LOAD(n)
     LOGICAL :: Stat,Found
     INTEGER :: i,t,p,q,dim, rankA, rankM
@@ -287,17 +461,14 @@ CONTAINS
 !------------------------------------------------------------------------------
 
     dim = CoordinateSystemDimension()
+    dimsheet = Element % TYPE % DIMENSION  ! should be 2 when because the hydrology solver is applied on a 2D boundary
 
     CALL GetElementNodes( Nodes )
     MASS  = 0._dp
     STIFF = 0._dp
     FORCE = 0._dp
     LOAD = 0._dp
-
-    ! Water sheet thickness (from previous iteration, I hope) at integration point
-    hwAtIP = SUM( nodalhw(1:n) * Basis(1:n) )   ! hw
-    dhwdxAtIP = MATMUL( nodalhw(1:n) , dBasisdx(1:n,1:2))   ! grad(hw)
-    !WRITE(*,*) 'DHDX', dhwdxAtIP
+    
     ! Get the basal melt source (from the heat solver) as the source of the hydrology solver
     BodyForce => GetBodyForce()
     IF ( ASSOCIATED(BodyForce) ) &
@@ -306,6 +477,9 @@ CONTAINS
     ! Get material property parameter values (at nodes for this element) from sif file
     CALL GetParameters(Element, Material, n, DensityWater, LatentHeat, Phi0, EffectivePressure, HydraulicConductivity, &
       dEffectivePressuredx, ddEffectivePressuredx, dHydraulicConductivitydx)
+    ! Calculate the linearised components of the water flux (Newton or Picard)
+    !---------------------------------------------------------------------------
+    !CALL CalculateWaterFluxComponents(Element, n, dimsheet, nodalhw, q0, qh, QQh)
 
     ! Numerical integration:
     !-----------------------
@@ -323,18 +497,25 @@ CONTAINS
       ! The source term at the integration point:
       !------------------------------------------
       LoadAtIP = SUM( Basis(1:n) * LOAD(1:n) )
-      
-      ! Parameters at integration point:
-      !---------------------------------
-      DensityWaterAtIP = SUM( DensityWater(1:n) * Basis(1:n))
-      LatentHeatAtIP = SUM( LatentHeat(1:n) * Basis(1:n))
+      !!WRITE(*,*) 'LoadIP', LoadAtIP
+
+      ! Water sheet thickness (from previous iteration, I hope) at integration point
+      !--------------------------------------------------
+      hwAtIP = SUM( nodalhw(1:n) * Basis(1:n) )   ! hw
+      dhwdxAtIP = MATMUL( nodalhw(1:n) , dBasisdx(1:n,1:dimsheet))   ! grad(hw)
+      !WRITE(*,*) 'dhwdx', dhwdxAtIP
+      !WRITE(*,*) 'Basis', Basis(1:n)
+      !WRITE(*,*) 'dBasisdx', dBasisdx(1:n,1:dimsheet)
 
       ! The different components of the flux when linearised:
       !------------------------------------------------------- 
-      gradPhi0AtIP = MATMUL( Phi0(1:n) , dBasisdx(1:n,1:2) )  ! where N = Phi0 - Phi
+      !WRITE(*,*) Phi0(1:n)
+      gradPhi0AtIP = MATMUL( Phi0(1:n) , dBasisdx(1:n,1:dimsheet) )  ! where N = Phi0 - Phi
+    
       HydraulicConductivityAtIP = SUM( HydraulicConductivity(1:n) * Basis(1:n) )
       EffectivePressureAtIP = SUM( EffectivePressure(1:n) * Basis(1:n) )
       dEffectivePressuredxAtIP = SUM( dEffectivePressuredx(1:n) * Basis(1:n) )
+      !
       
       ! Higher derivative needed for Newton iteration
       IF (Newton) THEN
@@ -344,30 +525,13 @@ CONTAINS
 
       ! Coefficient of hw in flux linearisation
       IF (Newton) THEN
-        !WRITE(*,*) 'NEWTON'
         qhAtIP = dHydraulicConductivitydxAtIP*dEffectivePressuredxAtIP*(gradPhi0AtIP - &
-          dEffectivePressuredx*dhwdxAtIP) - HydraulicConductivityAtIP*ddEffectivePressuredxAtIP*dhwdxAtIP
+          dEffectivePressuredxAtIP*dhwdxAtIP) - HydraulicConductivityAtIP*ddEffectivePressuredxAtIP*dhwdxAtIP
       ELSE
-        !WRITE(*,*) 'NOT NEWTON'
-        !qhAtIP = 0
-        qhAtIP = dHydraulicConductivitydxAtIP*dEffectivePressuredxAtIP*(gradPhi0AtIP - &
-          dEffectivePressuredx*dhwdxAtIP) - HydraulicConductivityAtIP*ddEffectivePressuredxAtIP*dhwdxAtIP
-          !WRITE(*,*) dHydraulicConductivitydxAtIP*dEffectivePressuredxAtIP*(gradPhi0AtIP)
-          !WRITE(*,*) '-', dHydraulicConductivitydxAtIP
-          !WRITE(*,*) '-', dEffectivePressuredxAtIP
-          !WRITE(*,*) '-', dhwdxAtIP
-
-          !WRITE(*,*) dEffectivePressuredx*dhwdxAtIP
-          !WRITE(*,*) '-',dEffectivePressuredx
-          !WRITE(*,*) '-',dhwdxAtIP
-
-          !WRITE(*,*) HydraulicConductivityAtIP*ddEffectivePressuredxAtIP*dhwdxAtIP
-          !WRITE(*,*) '-',HydraulicConductivityAtIP
-          !WRITE(*,*) '-',ddEffectivePressuredxAtIP
-          !WRITE(*,*) '-',dhwdxAtIP
-          !WRITE(*,*) qhAtIP
-
+        qhAtIP = 0
       END IF
+      !qhAtIP = MATMUL(  Basis(1:n), qh(1:n,1:dimsheet) )
+      !WRITE(*,*) 'qh', qhAtIP 
 
       ! Coefficient of grad(hw) in flux linearisation
       IF (Newton) THEN
@@ -375,75 +539,66 @@ CONTAINS
       ELSE
         QQhAtIP = -HydraulicConductivityAtIP*dEffectivePressuredxAtIP
       END IF
+      !QQhAtIP = SUM( QQh(1:n) * Basis(1:n) )
+      !WRITE(*,*) 'QQh', QQhAtIP 
 
       ! Order 1 term in flux linearisation
       IF (Newton) THEN
-        q0AtIP = HydraulicConductivityAtIP*gradPhi0AtIP - qhAtIP
+        q0AtIP = -HydraulicConductivityAtIP*gradPhi0AtIP 
       ELSE
-        q0AtIP = HydraulicConductivityAtIP*gradPhi0AtIP
+        q0AtIP = -HydraulicConductivityAtIP*gradPhi0AtIP
       END IF
+      !WRITE(*,*) gradPhi0AtIP
+      !q0AtIP = MATMUL( Basis(1:n), q0(1:n,1:dimsheet) )
+      !WRITE(*,*) 'q0', q0AtIP 
 
       Weight = IP % s(t) * DetJ
+
+
+      !PICARD NONLINEAR DIFFUSION
+      STIFF(1:nd,1:nd) = STIFF(1:nd,1:nd) - Weight * &
+             HydraulicConductivityAtIP*dEffectivePressuredxAtIP * MATMUL( dBasisdx, TRANSPOSE( dBasisdx ) )
+ 
+      !WRITE(*,*) STIFF(1:nd,1:nd)
 
       DO q=1,nd
         ! Melt source
         ! ------------------------------
         FORCE(q) = FORCE(q) + Weight * LoadAtIP * Basis(q)
-        
+
         ! Flux contribution: q0 term (g0,grad(theta))
-        FORCE(q) = FORCE(q) + Weight * DensityWaterAtIP * &
-          LatentHeatAtIP * SUM( dBasisdx(q,1:2) * q0AtIP(dim) )
+        FORCE(q) = FORCE(q) + Weight * SUM( dBasisdx(q,1:dimsheet) * q0AtIP(1:dimsheet) )
+        !WRITE(*,*) FORCE(q)
         DO p=1,nd
           ! Flux contribution: hw term (hw*qh,grad(theta))
           ! -----------------------------------
-          STIFF(p,q) = STIFF(p,q) - Weight * &
-            DensityWaterAtIP * LatentHeatAtIP * &
-            SUM(qhAtIP(1:2)*dBasisdx(q,1:2)) * Basis(p)
-          !WRITE(*,*) "--------------", p,q
- 
-          !WRITE(*,*) 'SUM', SUM(qhAtIP(1:2)*dBasisdx(q,1:2))
-          !WRITE(*,*) 'qhAtIP',qhAtIP(1:2)
-          !WRITE(*,*) 'dBasisdx', dBasisdx(q,1:2)
-
-      
-          !WRITE(*,*) 'SIFFPQ',STIFF(p,q)
+          !STIFF(p,q) = STIFF(p,q) + Weight * &
+          !  Basis(q) * Basis(p)   ! FAKE! REMOVE!!!
+          !STIFF (p,q) = STIFF(p,q) - Weight * &
+          !  SUM(qhAtIP(1:dimsheet)*dBasisdx(q,1:dimsheet)) * Basis(p)
 
           ! Flux contribution: grad(hw) term (QQh*grad(hw),grad(theta))
           ! -----------------------------------
-          STIFF(p,q) = STIFF(p,q) - Weight * DensityWaterAtIP * &
-            LatentHeatAtIP * QQhatIP*SUM(dBasisdx(q,1:2) * dBasisdx(p,1:2))
+          !STIFF(p,q) = STIFF(p,q) - Weight * &
+          !  QQhatIP*SUM(dBasisdx(q,1:dimsheet) * dBasisdx(p,1:dimsheet))
 
           ! Time derivative (rho*Lw*dhw/dt,theta):
           ! ------------------------------
-          MASS(p,q) = MASS(p,q) + Weight * DensityWaterAtIP * LatentHeatAtIP * &
-            Basis(q) * Basis(p)
+          MASS(p,q) = MASS(p,q) + Weight * Basis(q) * Basis(p)
+          !WRITE(*,*) 'STIFF entry:', STIFF(p,q)
+          !WRITE(*,*) 'MASS entry:', MASS(p,q)
         END DO
       END DO
-    END DO
-
-    ! Check ranks of siffness and mass matrices are full
-    rankA = RANK(STIFF)
-    rankM = RANK(MASS)
+      ! Check ranks of siffness and mass matrices are full
+      rankA = RANK(STIFF)
+      rankM = RANK(MASS)
+      !CALL Info('SheetSolverhw','Rank of M: '//I2S(rankM)//', rank of A: '//I2S(rankA)//', nd: '//I2S(nd)//', n: '//I2S(n),Level=1)
+    END DO    
 
     IF(TransientSimulation) CALL Default1stOrderTime(MASS,STIFF,FORCE)
-    !CALL CondensateP( nd-nb, nb, STIFF, FORCE )
+    CALL CondensateP( nd-nb, nb, STIFF, FORCE )
     CALL DefaultUpdateEquations(STIFF,FORCE)
-    !CALL Info('SheetSolverhw','Rank of Matrix: '//I2S(rankM)//', rank of A: '//I2S(rankA)//', nd: '//I2S(nd)//', n: '//I2S(n),Level=1)
-
-    !WRITE(*,*) 'Mass Matrix size = ', SIZE(MASS,1), ' x ', SIZE(MASS,2)
-    !DO i = 1, SIZE(MASS,1)
-    !    DO j = 1, SIZE(MASS,2)
-    !        WRITE(*,*) 'M', i, j, ':', MASS(i,j)
-    !    END DO
-    !END DO
-
-   !WRITE(*,*) 'Stiffness Matrix size = ', SIZE(STIFF,1), ' x ', SIZE(STIFF,2)
-   ! DO i = 1, SIZE(STIFF,1)
-   !     DO j = 1, SIZE(STIFF,2)
-   !         WRITE(*,*) 'M', i, j, ':', STIFF(i,j)
-   !     END DO
-   ! END DO
-
+    
 !------------------------------------------------------------------------------
   END SUBROUTINE LocalMatrix
 !------------------------------------------------------------------------------
