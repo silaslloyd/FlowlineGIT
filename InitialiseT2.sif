@@ -467,16 +467,16 @@ Material 3
   ! These should then be applied as functions inside the sheet solver (.f90).
   ! TO BE PLAYED WITH!
   Effective Pressure = Variable "Water Sheet Thickness"
-    Real LUA "max(N0*(hr - tx[0])/tx[0],eps)"
+      Real LUA "N0*(hr - tx[0])/(tx[0]+eps)"
   !Hydraulic Conductivity = Real #D0
   Hydraulic Conductivity = Variable "Effective Pressure"
     Real LUA "D0*(tx[0])^(-k0)"
     !Real LUA "D0*tx[0]^(-k0)"
     !Real LUA "D0*(0.5*(tx[0]+delta*log(cosh((tx[0]-eps)/delta))))^(-k0)
   Effective Pressure First Derivative = Variable "Water Sheet Thickness"
-    Real LUA "-N0*hr/(tx[0]^2)"
+      Real LUA "-N0*(hr + eps)/((tx[0] + eps)^2)"
   Effective Pressure Second Derivative = Variable "Water Sheet Thickness"
-    Real LUA "2*N0*hr/(tx[0])^3"
+      Real LUA "2*N0*(hr + eps)/((tx[0] + eps)^3)"
   !Hydraulic Conductivity First Derivative = Real 0.00
   Hydraulic Conductivity First Derivative = Variable "Effective Pressure"
     Real LUA " -k0*D0*(tx[0])^(-(k0+1))"
