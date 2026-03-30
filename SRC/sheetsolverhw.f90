@@ -131,8 +131,10 @@ SUBROUTINE SheetSolverhw( Model,Solver,dt,TransientSimulation )
   DO iter=1,maxiter
     CALL Info('SheetSolverhw','Sheet solver iteration: '//I2S(iter))
 
-    Newton = .TRUE. !GetNewtonActive()  ! logical that is 1 if Newton iterations are to be used (Picard otherwise)
+    !Newton =  GetNewtonActive()  ! logical that is 1 if Newton iterations are to be used (Picard otherwise)
+    Newton = .False.
 
+    !WRITE(*,*) Newton
     ! System assembly:
     !----------------
     CALL DefaultInitialize()
@@ -441,7 +443,7 @@ CONTAINS
     TYPE(Element_t), POINTER :: Element
 !------------------------------------------------------------------------------
     REAL(KIND=dp) :: DensityWater(n), LatentHeat(n), nodalhw(n), Phi0(n) !, dhwdx(n,dimsheet)
-    REAL(KIND=dp) :: gradPhi0(n,dimsheet), HydraulicConductivity(n), EffectivePressure(n)
+    REAL(KIND=dp) :: gradPhi0(n,dimsheet), gradN(n,dimsheet), graddNdh(n,dimsheet), HydraulicConductivity(n), EffectivePressure(n)
     REAL(KIND=dp) :: dEffectivePressuredx(n), ddEffectivePressuredx(n), dHydraulicConductivitydx(n)
     REAL(KIND=dp) :: DensityWaterAtIP, LatentHeatAtIP, hwAtIP
     REAL(KIND=dp) :: LoadAtIP, Weight
@@ -449,7 +451,8 @@ CONTAINS
     REAL(KIND=dp) :: ddEffectivePressuredxAtIP, dHydraulicConductivitydxAtIP
     REAL(KIND=dp) :: q0(n,dimsheet), qh(n,dimsheet), QQh(n)
     REAL(KIND=dp) :: QQhAtIp
-    REAL(KIND=dp) :: q0AtIP(dimsheet), dhwdxAtIP(dimsheet), gradPhi0AtIP(dimsheet), qhAtIP(dimsheet)
+    REAL(KIND=dp) :: dqdhAtIP(dimsheet), q0AtIP(dimsheet), dhwdxAtIP(dimsheet), gradPhi0AtIP(dimsheet), graddNdhAtIP(dimsheet)
+    REAL(KIND=dp) :: qhAtIP(dimsheet), gradNAtIP(dimsheet)
     REAL(KIND=dp) :: Basis(nd),dBasisdx(nd,dim),DetJ
     REAL(KIND=dp) :: MASS(nd,nd), STIFF(nd,nd), FORCE(nd), LOAD(n)
     LOGICAL :: Stat,Found
@@ -497,96 +500,56 @@ CONTAINS
       ! The source term at the integration point:
       !------------------------------------------
       LoadAtIP = SUM( Basis(1:n) * LOAD(1:n) )
-      !!WRITE(*,*) 'LoadIP', LoadAtIP
 
       ! Water sheet thickness (from previous iteration, I hope) at integration point
       !--------------------------------------------------
       hwAtIP = SUM( nodalhw(1:n) * Basis(1:n) )   ! hw
       dhwdxAtIP = MATMUL( nodalhw(1:n) , dBasisdx(1:n,1:dimsheet))   ! grad(hw)
-      !WRITE(*,*) 'dhwdx', dhwdxAtIP
-      !WRITE(*,*) 'Basis', Basis(1:n)
-      !WRITE(*,*) 'dBasisdx', dBasisdx(1:n,1:dimsheet)
 
-      ! The different components of the flux when linearised:
-      !------------------------------------------------------- 
-      !WRITE(*,*) Phi0(1:n)
+      !Gradient Values at IPs
       gradPhi0AtIP = MATMUL( Phi0(1:n) , dBasisdx(1:n,1:dimsheet) )  ! where N = Phi0 - Phi
-    
+      gradNAtIP = MATMUL( EffectivePressure(1:n) , dBasisdx(1:n,1:dimsheet) )
+      graddNdhAtIP = MATMUL( dEffectivePressuredx(1:n) , dBasisdx(1:n,1:dimsheet) )
+
+      !Non Gradient Values at IPs
       HydraulicConductivityAtIP = SUM( HydraulicConductivity(1:n) * Basis(1:n) )
       EffectivePressureAtIP = SUM( EffectivePressure(1:n) * Basis(1:n) )
       dEffectivePressuredxAtIP = SUM( dEffectivePressuredx(1:n) * Basis(1:n) )
-      !
-      
-      ! Higher derivative needed for Newton iteration
-      IF (Newton) THEN
-        dHydraulicConductivitydxAtIP = SUM( dHydraulicConductivitydx(1:n) * Basis(1:n) )
-        ddEffectivePressuredxAtIP = SUM( ddEffectivePressuredx(1:n) * Basis(1:n) )
-      END IF
+      dHydraulicConductivitydxAtIP = SUM( dHydraulicConductivitydx(1:n) * Basis(1:n) )
 
-      ! Coefficient of hw in flux linearisation
-      IF (Newton) THEN
-        qhAtIP = dHydraulicConductivitydxAtIP*dEffectivePressuredxAtIP*(gradPhi0AtIP - &
-          dEffectivePressuredxAtIP*dhwdxAtIP) - HydraulicConductivityAtIP*ddEffectivePressuredxAtIP*dhwdxAtIP
-      ELSE
-        qhAtIP = 0
-      END IF
-      !qhAtIP = MATMUL(  Basis(1:n), qh(1:n,1:dimsheet) )
-      !WRITE(*,*) 'qh', qhAtIP 
+      dqdhAtIP = -dHydraulicConductivitydxAtIP*dEffectivePressuredxAtIP*(gradPhi0AtIP - gradNAtIP) + & 
+      HydraulicConductivityAtIP*graddNdhAtIP
 
-      ! Coefficient of grad(hw) in flux linearisation
-      IF (Newton) THEN
-        QQhAtIP = -HydraulicConductivityAtIP*dEffectivePressuredxAtIP
-      ELSE
-        QQhAtIP = -HydraulicConductivityAtIP*dEffectivePressuredxAtIP
-      END IF
-      !QQhAtIP = SUM( QQh(1:n) * Basis(1:n) )
-      !WRITE(*,*) 'QQh', QQhAtIP 
-
-      ! Order 1 term in flux linearisation
-      IF (Newton) THEN
-        q0AtIP = -HydraulicConductivityAtIP*gradPhi0AtIP 
-      ELSE
-        q0AtIP = -HydraulicConductivityAtIP*gradPhi0AtIP
-      END IF
-      !WRITE(*,*) gradPhi0AtIP
-      !q0AtIP = MATMUL( Basis(1:n), q0(1:n,1:dimsheet) )
-      !WRITE(*,*) 'q0', q0AtIP 
+      qhAtIP = - HydraulicConductivityAtIP*(gradPhi0AtIP - gradNAtIP)
+      q0AtIP = -HydraulicConductivityAtIP*gradPhi0AtIP
 
       Weight = IP % s(t) * DetJ
-
-
-      !PICARD NONLINEAR DIFFUSION
-      STIFF(1:nd,1:nd) = STIFF(1:nd,1:nd) + Weight * &
-             (-HydraulicConductivityAtIP)*dEffectivePressuredxAtIP * MATMUL( dBasisdx, TRANSPOSE( dBasisdx ) )
- 
-      !WRITE(*,*) STIFF(1:nd,1:nd)
-
+      
+  
       DO q=1,nd
         ! Melt source
         ! ------------------------------
         FORCE(q) = FORCE(q) + Weight * LoadAtIP * Basis(q)
 
-        ! Flux contribution: q0 term (g0,grad(theta))
-        FORCE(q) = FORCE(q) + Weight * SUM( dBasisdx(q,1:dimsheet) * q0AtIP(1:dimsheet) )
-        !WRITE(*,*) FORCE(q)
+        !RHS FLUX TERM
+        IF (Newton) THEN
+          FORCE(q) = FORCE(q) + Weight * SUM( dBasisdx(q,1:dimsheet) *(qhAtIP(1:dimsheet)-hwAtIP*dqdhAtIP(1:dimsheet)) )
+        ELSE
+          FORCE(q) = FORCE(q) + Weight * SUM( dBasisdx(q,1:dimsheet) *q0AtIP(1:dimsheet) )
+        END IF
+
         DO p=1,nd
-          ! Flux contribution: hw term (hw*qh,grad(theta))
-          ! -----------------------------------
-          !STIFF(p,q) = STIFF(p,q) + Weight * &
-          !  Basis(q) * Basis(p)   ! FAKE! REMOVE!!!
-          !STIFF (p,q) = STIFF(p,q) - Weight * &
-          !  SUM(qhAtIP(1:dimsheet)*dBasisdx(q,1:dimsheet)) * Basis(p)
 
-          ! Flux contribution: grad(hw) term (QQh*grad(hw),grad(theta))
-          ! -----------------------------------
-          !STIFF(p,q) = STIFF(p,q) - Weight * &
-          !  QQhatIP*SUM(dBasisdx(q,1:dimsheet) * dBasisdx(p,1:dimsheet))
+          IF (Newton) THEN
+            STIFF (p,q) = STIFF(p,q) - Weight * &
+            SUM(dqdhAtIP(1:dimsheet)*dBasisdx(q,1:dimsheet)) * Basis(p)
+          ELSE
+            STIFF(p,q) = STIFF(p,q) - Weight * &
+              (HydraulicConductivityAtIP)*dEffectivePressuredxAtIP * &
+          SUM(dBasisdx(q,1:dimsheet) * dBasisdx(p,1:dimsheet))
+          END IF
 
-          ! Time derivative (rho*Lw*dhw/dt,theta):
-          ! ------------------------------
           MASS(p,q) = MASS(p,q) + Weight * Basis(q) * Basis(p)
-          !WRITE(*,*) 'STIFF entry:', STIFF(p,q)
-          !WRITE(*,*) 'MASS entry:', MASS(p,q)
         END DO
       END DO
       ! Check ranks of siffness and mass matrices are full
@@ -594,11 +557,16 @@ CONTAINS
       rankM = RANK(MASS)
       !CALL Info('SheetSolverhw','Rank of M: '//I2S(rankM)//', rank of A: '//I2S(rankA)//', nd: '//I2S(nd)//', n: '//I2S(n),Level=1)
     END DO    
-
+ 
     IF(TransientSimulation) CALL Default1stOrderTime(MASS,STIFF,FORCE)
+    !WRITE(*,*) "_______________________"
+    !WRITE(*,*) STIFF
+    !WRITE(*,*) FORCE
+    !WRITE(*,*) "_______________________"
+
     CALL CondensateP( nd-nb, nb, STIFF, FORCE )
     CALL DefaultUpdateEquations(STIFF,FORCE)
-    
+
 !------------------------------------------------------------------------------
   END SUBROUTINE LocalMatrix
 !------------------------------------------------------------------------------

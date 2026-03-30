@@ -72,7 +72,7 @@ Tsurf = T0 - Tscale
 -- # Mesh Parameters
 GL = 2.1*xscale
 L = 2.5*xscale
-GLRes =xscale/2000
+GLRes =xscale/30
 BoundaryRes = xscale/30
 nodes = 128
 
@@ -82,13 +82,12 @@ k = 0.01 -- sheet conductivity in m^(7/4) kg^(-1/2)
 lr = 2 -- cavity spacing in m
 hr = 0.1 -- Bedrock bump height in m
 
-N0 = 10 -- Effective pressure constant (MPa) - GUESSED VALUE!
+N0 = 1 -- Effective pressure constant (MPa) - GUESSED VALUE!
 k0 = 4/3 -- Hydraulic conductivity exponent - value from Schoof and Mantelli 2021
-D0 = 1e4 -- Hydraulic conductivity constant (??) - GUESSED VALUE!
+D0 = 1e7 -- Hydraulic conductivity constant (??) - GUESSED VALUE!
 
 Ncutepsdiff = 2/3 -- must be >1/3, used for regularisation
-eps = 0.1 ---0.01 -- tolerance used in hydraulic conductivity parametrisation
+eps = 0.001 ---0.01 -- tolerance used in hydraulic conductivity parametrisation
 Ncut = eps + Ncutepsdiff --0.001 -- tolerance used in hydraulic conductivity parametrisation
 Ncoeff = (1/Ncut)*(1/3+((1/18)*(3*(Ncut-eps)-1))^(1/2))  -- for regularisation Ntilde = Ncoeff*N^2 + (1-2*delta*Ncoeff)*N + eps
-
 
