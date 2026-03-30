@@ -6,6 +6,36 @@ function IfThenElse(condition,t,f)
    end 
 end
 
+function smoothplus(x, eps)
+  k = 10
+  X = eps+ math.log(1+math.exp(k*x))/k
+  return X
+end
+
+function smoothplusDerivative(x)
+  k = 10
+  return 1/(1+math.exp(k*x))
+end
+
+
+function smoothmax(a,b)
+  k = 50
+  return 1/k * math.log(math.exp(k*a) + math.exp(k*b))
+end
+
+function smoothmaxDerivative(a,b)
+  k = 50
+  return math.exp(k*a)/(math.exp(k*a) + math.exp(k*b))
+end
+
+function hwCondition(gm)
+  if gm < 0 then 
+    return hr
+  else 
+    return 0
+  end
+end
+
 function Tinit(x,z,Tsurf,Tdivide,T0,xg,N_total,N_Bedrock)
 
   zmax = 1
@@ -135,11 +165,25 @@ function min(a,b )
  end  
 end
 
-function getmeltrate(loads,weights,friction, gm)
+function max(a,b )
+ if (a < b) then
+   return b
+ else
+   return a
+ end  
+end
+
+function InitialSheet(x)
+  return 1e-4 + 0*0.05*math.exp(-((x-3e6)/5e4)^2)
+end
+
+function getmeltrate(loads,weights,friction, gm, time)
   if gm <= 0.0 then
     return 0.0
   else
-    melt =  -(loads-friction)/(weights*rhoi*Lw)
+    melt =  -(loads-0*friction)/(weights*rhoi*Lw)
+    melt = IfThenElse(time < 1E-2, 0, melt)
+    --melt = -(loads-friction)/(weights)
     return melt
   end
 end
