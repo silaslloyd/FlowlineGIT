@@ -29,7 +29,7 @@ function smoothmaxDerivative(a,b)
 end
 
 function hwCondition(gm)
-  if gm < 0 then 
+  if gm < 0.5 then 
     return hr
   else 
     return 0
@@ -186,6 +186,11 @@ function getmeltrate(loads,weights,friction, gm, time)
     --melt = -(loads-friction)/(weights)
     return melt
   end
+end
+
+function InitialCTMask(T,T0)
+  
+  return IfThenElse(T <272, -1, 1)
 end
 
 function getmeltrate2(lx, ly, lz, vx, vy, vz)

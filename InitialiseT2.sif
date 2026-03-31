@@ -353,8 +353,8 @@ Body Force 4 !2
     Real LUA "getmeltrate(tx[0],tx[1],tx[2],tx[3],tx[4]) + Source*tx[2]"
 
 
-    Effective Pressure Output = Variable "Water Sheet Thickness"
-      Real LUA "N0*(hr - tx[0])/(tx[0]+eps)"
+    Effective Pressure = Variable "Water Sheet Thickness"
+    Real LUA "N0*(hr - tx[0])/(tx[0]^2+eps^2)^0.5+eps"
 
     Hydraulic Conductivity Output = Variable "Effective Pressure Output"
     Real LUA "D0*(smoothplus(tx[0], eps))^(-k0)"
@@ -460,7 +460,7 @@ Material 3
   !Basal Velocity 1 = Equals Velocity 1
   !Basal Velocity 2 = Equals Velocity 2
   !Basal Velocity 3 = Equals Velocity 3
-  Phi0 = Variable "Stress 3", "Bedrock"   ! I THINK Stress 3 is the upward (z-direction) ice pressure, making the negative the ice overburden (downward) pressure
+  Phi0 = Variable "Stress 3", "zb"   ! I THINK Stress 3 is the upward (z-direction) ice pressure, making the negative the ice overburden (downward) pressure
     Real LUA "-tx[0] + rhow*gravity*tx[1]"   ! 'reference' hydraulic potential
 
   ! Functional relationships for effective pressure and hydraulic conductivity.

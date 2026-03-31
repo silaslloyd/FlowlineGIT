@@ -72,7 +72,7 @@ Tsurf = T0 - Tscale
 -- # Mesh Parameters
 GL = 2.1*xscale
 L = 2.5*xscale
-GLRes =xscale/30
+GLRes =xscale/2000
 BoundaryRes = xscale/30
 nodes = 128
 
@@ -87,7 +87,7 @@ k0 = 4/3 -- Hydraulic conductivity exponent - value from Schoof and Mantelli 202
 D0 = 1e7 -- Hydraulic conductivity constant (??) - GUESSED VALUE!
 
 Ncutepsdiff = 2/3 -- must be >1/3, used for regularisation
-eps = 0.001 ---0.01 -- tolerance used in hydraulic conductivity parametrisation
+eps = 0.01 ---0.01 -- tolerance used in hydraulic conductivity parametrisation
 Ncut = eps + Ncutepsdiff --0.001 -- tolerance used in hydraulic conductivity parametrisation
 Ncoeff = (1/Ncut)*(1/3+((1/18)*(3*(Ncut-eps)-1))^(1/2))  -- for regularisation Ntilde = Ncoeff*N^2 + (1-2*delta*Ncoeff)*N + eps
 
